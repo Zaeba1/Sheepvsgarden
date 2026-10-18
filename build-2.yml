@@ -1,0 +1,64 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip game archive
+        run: |
+          ZIP=$(ls *.zip | head -n 1)
+          echo "Archive: $ZIP"
+          mkdir -p unpacked
+          unzip -q -o "$ZIP" -d unpacked
+          INDEX=$(find unpacked -name index.html -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$INDEX" ]; then echo "index.html not found in archive"; exit 1; fi
+          SRC=$(dirname "$INDEX")
+          echo "Game root: $SRC"
+          mkdir www
+          cp -r "$SRC"/. www/
+          ls -la www
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Create Capacitor project
+        run: |
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.zaeba.sheepvscabbage",
+            "appName": "Sheep vs Cabbage",
+            "webDir": "www"
+          }
+          JSON
+          npx cap add android
+          npx cap sync android
+
+      - name: Force landscape
+        run: |
+          F=android/app/src/main/AndroidManifest.xml
+          sed -i 's/<activity/<activity android:screenOrientation="sensorLandscape"/' "$F"
+          grep -n "screenOrientation" "$F"
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sheep-vs-cabbage-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
